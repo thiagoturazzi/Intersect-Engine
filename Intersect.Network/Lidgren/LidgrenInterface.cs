@@ -67,6 +67,7 @@ namespace Intersect.Network.Lidgren
 
             mPeerConfiguration.DisableMessageType(NetIncomingMessageType.Receipt);
             mPeerConfiguration.EnableMessageType(NetIncomingMessageType.UnconnectedData);
+            mPeerConfiguration.EnableMessageType(NetIncomingMessageType.ConnectionLatencyUpdated);
 
             if (configuration.IsServer)
             {
@@ -82,26 +83,19 @@ namespace Intersect.Network.Lidgren
 
             if (Debugger.IsAttached)
             {
+                mPeerConfiguration.ConnectionTimeout = 60;
+                mPeerConfiguration.EnableMessageType(NetIncomingMessageType.VerboseDebugMessage);
                 mPeerConfiguration.EnableMessageType(NetIncomingMessageType.DebugMessage);
                 mPeerConfiguration.EnableMessageType(NetIncomingMessageType.ErrorMessage);
                 mPeerConfiguration.EnableMessageType(NetIncomingMessageType.Error);
             }
             else
             {
+                mPeerConfiguration.ConnectionTimeout = 15;
+                mPeerConfiguration.DisableMessageType(NetIncomingMessageType.VerboseDebugMessage);
                 mPeerConfiguration.DisableMessageType(NetIncomingMessageType.DebugMessage);
                 mPeerConfiguration.DisableMessageType(NetIncomingMessageType.ErrorMessage);
                 mPeerConfiguration.DisableMessageType(NetIncomingMessageType.Error);
-            }
-
-            if (Debugger.IsAttached)
-            {
-                mPeerConfiguration.ConnectionTimeout = 60;
-                mPeerConfiguration.EnableMessageType(NetIncomingMessageType.VerboseDebugMessage);
-            }
-            else
-            {
-                mPeerConfiguration.ConnectionTimeout = 15;
-                mPeerConfiguration.DisableMessageType(NetIncomingMessageType.VerboseDebugMessage);
             }
 
             mPeerConfiguration.PingInterval = 2.5f;
@@ -185,14 +179,18 @@ namespace Intersect.Network.Lidgren
             mRng.GetNonZeroBytes(handshakeSecret);
 
             var connectionRsa = new RSACryptoServiceProvider(2048);
+            var hailParameters = connectionRsa.ExportParameters(false);
+            var hail = new HailPacket(mRsa, handshakeSecret, SharedConstants.VersionData, hailParameters);
+            hail.Encrypt();
 
-            var hail = new HailPacket(
-                mRsa, handshakeSecret, SharedConstants.VersionData, connectionRsa.ExportParameters(false)
-            );
+            var hailMessage = mPeer.CreateMessage(hail.Data.Length);
+            if (hailMessage == null)
+            {
+                throw new InvalidOperationException();
+            }
 
-            var hailMessage = mPeer.CreateMessage();
             hailMessage.Data = hail.Data;
-            hailMessage.LengthBytes = hailMessage.Data.Length;
+            hailMessage.LengthBytes = hail.Data.Length;
 
             if (mPeer.Status == NetPeerStatus.NotRunning)
             {
@@ -215,10 +213,22 @@ namespace Intersect.Network.Lidgren
             return false;
         }
 
+        protected IConnection FindConnection(NetConnection netConnection)
+        {
+            var lidgrenId = netConnection?.RemoteUniqueIdentifier ?? -1;
+            Debug.Assert(mGuidLookup != null, "mGuidLookup != null");
+            if (!mGuidLookup.TryGetValue(lidgrenId, out var guid))
+            {
+                return default;
+            }
+
+            return mNetwork.FindConnection(guid);
+        }
+
         public bool TryGetInboundBuffer(out IBuffer buffer, out IConnection connection)
         {
-            buffer = default(IBuffer);
-            connection = default(IConnection);
+            buffer = default;
+            connection = default;
 
             var message = TryHandleInboundMessage();
             if (message == null)
@@ -226,17 +236,14 @@ namespace Intersect.Network.Lidgren
                 return true;
             }
 
-            var lidgrenId = message.SenderConnection?.RemoteUniqueIdentifier ?? -1;
-            Debug.Assert(mGuidLookup != null, "mGuidLookup != null");
-            if (!mGuidLookup.TryGetValue(lidgrenId, out var guid))
+            connection = FindConnection(message.SenderConnection);
+            if (connection == null)
             {
-                Log.Error($"Missing connection: {guid}");
+                Log.Error($"Received message from an unregistered endpoint.");
                 mPeer.Recycle(message);
 
                 return false;
             }
-
-            connection = mNetwork.FindConnection(guid);
 
             if (connection != null)
             {
@@ -464,8 +471,8 @@ namespace Intersect.Network.Lidgren
                 return null;
             }
 
-            var connection = message.SenderConnection;
-            var lidgrenId = connection?.RemoteUniqueIdentifier ?? -1;
+            var senderConnection = message.SenderConnection;
+            var lidgrenId = senderConnection?.RemoteUniqueIdentifier ?? -1;
             var lidgrenIdHex = BitConverter.ToString(BitConverter.GetBytes(lidgrenId));
 
             switch (message.MessageType)
@@ -479,19 +486,19 @@ namespace Intersect.Network.Lidgren
                     Debug.Assert(mGuidLookup != null, "mGuidLookup != null");
                     Debug.Assert(mNetwork != null, "mNetwork != null");
 
-                    switch (connection?.Status ?? NetConnectionStatus.None)
+                    switch (senderConnection?.Status ?? NetConnectionStatus.None)
                     {
                         case NetConnectionStatus.None:
                         case NetConnectionStatus.InitiatedConnect:
                         case NetConnectionStatus.ReceivedInitiation:
                         case NetConnectionStatus.RespondedAwaitingApproval:
                         case NetConnectionStatus.RespondedConnect:
-                            Log.Diagnostic($"{message.MessageType}: {message} [{connection?.Status}]");
+                            Log.Diagnostic($"{message.MessageType}: {message} [{senderConnection?.Status}]");
 
                             break;
 
                         case NetConnectionStatus.Disconnecting:
-                            Log.Debug($"{message.MessageType}: {message} [{connection?.Status}]");
+                            Log.Debug($"{message.MessageType}: {message} [{senderConnection?.Status}]");
 
                             break;
 
@@ -505,29 +512,36 @@ namespace Intersect.Network.Lidgren
                                 {
                                     Log.Error("Bad state, no connection found.");
                                     mNetwork.Disconnect("client_connection_missing");
-                                    connection?.Disconnect("client_connection_missing");
+                                    senderConnection?.Disconnect("client_connection_missing");
 
                                     break;
                                 }
 
                                 FireHandler(
-                                    OnConnectionApproved,
-                                    nameof(OnConnectionApproved),
-                                    this,
-                                    new ConnectionEventArgs
+                                    OnConnectionApproved, nameof(OnConnectionApproved), this, new ConnectionEventArgs
                                     {
                                         NetworkStatus = NetworkStatus.Connecting,
                                         Connection = intersectConnection
                                     }
                                 );
 
-                                Debug.Assert(connection != null, "connection != null");
-                                var approval = (ApprovalPacket) mCeras.Deserialize(connection.RemoteHailMessage.Data);
+                                Debug.Assert(senderConnection != null, "connection != null");
+                                var approvalPacketData = senderConnection.RemoteHailMessage.Data;
+                                var approval = mCeras.Deserialize<ApprovalPacket>(approvalPacketData);
+
+                                if (!(approval?.Decrypt(intersectConnection.Rsa) ?? false))
+                                {
+                                    Log.Error("Unable to read approval message, disconnecting.");
+                                    mNetwork.Disconnect("client_error");
+                                    senderConnection.Disconnect("client_error");
+
+                                    break;
+                                }
 
                                 if (!intersectConnection.HandleApproval(approval))
                                 {
                                     mNetwork.Disconnect(NetworkStatus.HandshakeFailure.ToString());
-                                    connection.Disconnect(NetworkStatus.HandshakeFailure.ToString());
+                                    senderConnection.Disconnect(NetworkStatus.HandshakeFailure.ToString());
 
                                     break;
                                 }
@@ -540,15 +554,15 @@ namespace Intersect.Network.Lidgren
                                 clientNetwork.AssignGuid(approval.Guid);
 
                                 Debug.Assert(mGuidLookup != null, "mGuidLookup != null");
-                                mGuidLookup.Add(connection.RemoteUniqueIdentifier, Guid.Empty);
+                                mGuidLookup.Add(senderConnection.RemoteUniqueIdentifier, Guid.Empty);
                             }
                             else
                             {
-                                Log.Diagnostic($"{message.MessageType}: {message} [{connection?.Status}]");
+                                Log.Diagnostic($"{message.MessageType}: {message} [{senderConnection?.Status}]");
                                 if (!mGuidLookup.TryGetValue(lidgrenId, out var guid))
                                 {
                                     Log.Error($"Unknown client connected ({lidgrenIdHex}).");
-                                    connection?.Disconnect("server_unknown_client");
+                                    senderConnection?.Disconnect("server_unknown_client");
 
                                     break;
                                 }
@@ -562,10 +576,7 @@ namespace Intersect.Network.Lidgren
                             }
 
                             FireHandler(
-                                OnConnected,
-                                nameof(OnConnected),
-                                this,
-                                new ConnectionEventArgs
+                                OnConnected, nameof(OnConnected), this, new ConnectionEventArgs
                                 {
                                     NetworkStatus = NetworkStatus.Online,
                                     Connection = intersectConnection
@@ -577,8 +588,8 @@ namespace Intersect.Network.Lidgren
 
                         case NetConnectionStatus.Disconnected:
                         {
-                            Debug.Assert(connection != null, "connection != null");
-                            Log.Debug($"{message.MessageType}: {message} [{connection.Status}]");
+                            Debug.Assert(senderConnection != null, "connection != null");
+                            Log.Debug($"{message.MessageType}: {message} [{senderConnection.Status}]");
                             var result = (NetConnectionStatus) message.ReadByte();
                             var reason = message.ReadString();
 
@@ -590,18 +601,28 @@ namespace Intersect.Network.Lidgren
                                     //Lidgren won't accept a connection with a bad version and sends this message back so we need to manually handle it
                                     case "Wrong application identifier!":
                                         networkStatus = NetworkStatus.VersionMismatch;
+
                                         break;
 
                                     case "Connection timed out":
                                         networkStatus = NetworkStatus.Quitting;
+
                                         break;
 
                                     case "Failed to establish connection - no response from remote host":
                                         networkStatus = NetworkStatus.Offline;
+
+                                        break;
+
+                                    case "closing":
+                                        networkStatus = NetworkStatus.Offline;
                                         break;
 
                                     default:
-                                        networkStatus = (NetworkStatus)Enum.Parse(typeof(NetworkStatus), reason ?? "<null>", true);
+                                        networkStatus = (NetworkStatus) Enum.Parse(
+                                            typeof(NetworkStatus), reason ?? "<null>", true
+                                        );
+
                                         break;
                                 }
                             }
@@ -621,6 +642,7 @@ namespace Intersect.Network.Lidgren
                                 case NetworkStatus.Failed:
                                     disconnectHandler = OnConnectionDenied;
                                     disconnectHandlerName = nameof(OnConnectionDenied);
+
                                     break;
 
                                 case NetworkStatus.Connecting:
@@ -630,6 +652,7 @@ namespace Intersect.Network.Lidgren
                                 case NetworkStatus.Unknown:
                                     disconnectHandler = OnDisconnected;
                                     disconnectHandlerName = nameof(OnDisconnected);
+
                                     break;
 
                                 default:
@@ -639,7 +662,10 @@ namespace Intersect.Network.Lidgren
                             if (!mGuidLookup.TryGetValue(lidgrenId, out var guid))
                             {
                                 Log.Debug($"Unknown client disconnected ({lidgrenIdHex}).");
-                                FireHandler(disconnectHandler, disconnectHandlerName, this, new ConnectionEventArgs { NetworkStatus = networkStatus });
+                                FireHandler(
+                                    disconnectHandler, disconnectHandlerName, this,
+                                    new ConnectionEventArgs {NetworkStatus = networkStatus}
+                                );
 
                                 break;
                             }
@@ -649,11 +675,15 @@ namespace Intersect.Network.Lidgren
                             {
                                 client.HandleDisconnected();
 
-                                FireHandler(disconnectHandler, disconnectHandlerName, this, new ConnectionEventArgs { Connection = client, NetworkStatus = NetworkStatus.Offline });
+                                FireHandler(
+                                    disconnectHandler, disconnectHandlerName, this,
+                                    new ConnectionEventArgs {Connection = client, NetworkStatus = NetworkStatus.Offline}
+                                );
+
                                 mNetwork.RemoveConnection(client);
                             }
 
-                            mGuidLookup.Remove(connection.RemoteUniqueIdentifier);
+                            mGuidLookup.Remove(senderConnection.RemoteUniqueIdentifier);
                         }
 
                             break;
@@ -674,22 +704,42 @@ namespace Intersect.Network.Lidgren
                 {
                     try
                     {
-                        var hail = (HailPacket) mCeras.Deserialize(message.Data);
+                        var hail = mCeras.Deserialize<HailPacket>(message.Data);
+                        if (!(hail?.Decrypt(mRsa) ?? false))
+                        {
+                            Log.Warn($"Failed to read hail, denying connection [{lidgrenIdHex}].");
+                            senderConnection?.Deny(NetworkStatus.HandshakeFailure.ToString());
+
+                            break;
+                        }
 
                         Debug.Assert(SharedConstants.VersionData != null, "SharedConstants.VERSION_DATA != null");
                         Debug.Assert(hail.VersionData != null, "hail.VersionData != null");
                         if (!SharedConstants.VersionData.SequenceEqual(hail.VersionData))
                         {
                             Log.Error($"Bad version detected, denying connection [{lidgrenIdHex}].");
-                            connection?.Deny(NetworkStatus.VersionMismatch.ToString());
+                            senderConnection?.Deny(NetworkStatus.VersionMismatch.ToString());
 
+                            break;
+                        }
+                        
+                        Log.Debug($"hail Time={hail.Adjusted / TimeSpan.TicksPerMillisecond} Offset={hail.Offset / TimeSpan.TicksPerMillisecond} Real={hail.UTC / TimeSpan.TicksPerMillisecond}");
+                        Log.Debug($"local Time={Timing.Global.Milliseconds} Offset={(long)Timing.Global.MillisecondsOffset} Real={Timing.Global.MillisecondsUTC}");
+                        Log.Debug($"real delta={(Timing.Global.TicksUTC - hail.UTC) / TimeSpan.TicksPerMillisecond}");
+                        Log.Debug($"NCPing={(long)Math.Ceiling(senderConnection.AverageRoundtripTime * 1000)}");
+
+                        // Check if we've got more connections than we're allowed to handle!
+                        if (mNetwork.ConnectionCount >= Options.MaxConnections)
+                        {
+                            Log.Info($"Connection limit reached, denying connection [{lidgrenIdHex}].");
+                                senderConnection?.Deny(NetworkStatus.ServerFull.ToString());
                             break;
                         }
 
                         if (OnConnectionApproved == null)
                         {
                             Log.Error($"No handlers for OnConnectionApproved, denying connection [{lidgrenIdHex}].");
-                            connection?.Deny(NetworkStatus.Failed.ToString());
+                            senderConnection?.Deny(NetworkStatus.Failed.ToString());
 
                             break;
                         }
@@ -697,12 +747,12 @@ namespace Intersect.Network.Lidgren
                         /* Approving connection from here-on. */
                         var aesKey = new byte[32];
                         mRng?.GetNonZeroBytes(aesKey);
-                        var client = new LidgrenConnection(mNetwork, connection, aesKey, hail.RsaParameters);
+                        var client = new LidgrenConnection(mNetwork, senderConnection, aesKey, hail.RsaParameters);
 
                         if (!OnConnectionRequested(this, client))
                         {
                             Log.Warn($"Connection blocked due to ban or ip filter!");
-                            connection?.Deny(NetworkStatus.Failed.ToString());
+                            senderConnection?.Deny(NetworkStatus.Failed.ToString());
 
                             break;
                         }
@@ -711,26 +761,36 @@ namespace Intersect.Network.Lidgren
                         if (!mNetwork.AddConnection(client))
                         {
                             Log.Error($"Failed to add the connection.");
-                            connection?.Deny(NetworkStatus.Failed.ToString());
+                            senderConnection?.Deny(NetworkStatus.Failed.ToString());
 
                             break;
                         }
 
                         Debug.Assert(mGuidLookup != null, "mGuidLookup != null");
-                        Debug.Assert(connection != null, "connection != null");
-                        mGuidLookup.Add(connection.RemoteUniqueIdentifier, client.Guid);
+                        Debug.Assert(senderConnection != null, "connection != null");
+                        mGuidLookup.Add(senderConnection.RemoteUniqueIdentifier, client.Guid);
 
                         Debug.Assert(mPeer != null, "mPeer != null");
                         var approval = new ApprovalPacket(client.Rsa, hail.HandshakeSecret, aesKey, client.Guid);
-                        var approvalMessage = mPeer.CreateMessage();
+                        approval.Encrypt();
+
+                        var approvalMessage = mPeer.CreateMessage(approval.Data.Length);
+                        if (approvalMessage == null)
+                        {
+                            throw new InvalidOperationException();
+                        }
+
                         approvalMessage.Data = approval.Data;
                         approvalMessage.LengthBytes = approvalMessage.Data.Length;
-                        connection.Approve(approvalMessage);
-                        OnConnectionApproved(this, new ConnectionEventArgs { Connection = client, NetworkStatus = NetworkStatus.Online });
+                        senderConnection.Approve(approvalMessage);
+
+                        OnConnectionApproved(
+                            this, new ConnectionEventArgs {Connection = client, NetworkStatus = NetworkStatus.Online}
+                        );
                     }
                     catch
                     {
-                        connection?.Deny(NetworkStatus.Failed.ToString());
+                        senderConnection?.Deny(NetworkStatus.Failed.ToString());
                     }
 
                     break;
@@ -765,10 +825,20 @@ namespace Intersect.Network.Lidgren
                 case NetIncomingMessageType.DiscoveryRequest:
                 case NetIncomingMessageType.DiscoveryResponse:
                 case NetIncomingMessageType.NatIntroductionSuccess:
-                case NetIncomingMessageType.ConnectionLatencyUpdated:
                     Log.Diagnostic($"Net Incoming Message: {message.MessageType}: {message}");
-
                     break;
+
+                case NetIncomingMessageType.ConnectionLatencyUpdated:
+                {
+                    Log.Diagnostic($"Net Incoming Message: {message.MessageType}: {message}");
+                    var rtt = message.ReadFloat();
+                    var connection = FindConnection(senderConnection);
+                    if (connection != null)
+                    {
+                        connection.Statistics.Ping = (long)Math.Ceiling(senderConnection.AverageRoundtripTime * 1000);
+                    }
+                    break;
+                }
 
                 default:
                     throw new ArgumentOutOfRangeException();

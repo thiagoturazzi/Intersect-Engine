@@ -369,8 +369,8 @@ namespace Intersect.Editor.Forms.Editors
             {
                 var img = Image.FromFile("resources/entities/" + cmbSprite.Text);
                 gfx.DrawImage(
-                    img, new Rectangle(0, 0, img.Width / 4, img.Height / 4),
-                    new Rectangle(0, 0, img.Width / 4, img.Height / 4), GraphicsUnit.Pixel
+                    img, new Rectangle(0, 0, img.Width / Options.Instance.Sprites.NormalFrames, img.Height / Options.Instance.Sprites.Directions),
+                    new Rectangle(0, 0, img.Width / Options.Instance.Sprites.NormalFrames, img.Height / Options.Instance.Sprites.Directions), GraphicsUnit.Pixel
                 );
 
                 img.Dispose();
@@ -709,6 +709,9 @@ namespace Intersect.Editor.Forms.Editors
 
         private void nudDropAmount_ValueChanged(object sender, EventArgs e)
         {
+            // This should never be below 1. We shouldn't accept giving 0 items!
+            nudDropAmount.Value = Math.Max(1, nudDropAmount.Value);
+
             if (lstDrops.SelectedIndex < lstDrops.Items.Count)
             {
                 return;

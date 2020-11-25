@@ -240,9 +240,10 @@ namespace Intersect.Editor.Forms.Editors
             grpSpell.Text = Strings.ItemEditor.spellpanel;
             lblSpell.Text = Strings.ItemEditor.spell;
             chkQuickCast.Text = Strings.ItemEditor.quickcast;
-            chkDestroy.Text = Strings.ItemEditor.destroyspell;
+            chkSingleUseSpell.Text = Strings.ItemEditor.destroyspell;
 
             grpEvent.Text = Strings.ItemEditor.eventpanel;
+            chkSingleUseEvent.Text = Strings.ItemEditor.SingleUseEvent;
 
             grpConsumable.Text = Strings.ItemEditor.consumeablepanel;
             lblVital.Text = Strings.ItemEditor.vital;
@@ -383,6 +384,7 @@ namespace Intersect.Editor.Forms.Editors
             grpEquipment.Visible = false;
             grpEvent.Visible = false;
             grpBags.Visible = false;
+            chkStackable.Enabled = true;
 
             if ((int) mEditorItem.ItemType != cmbType.SelectedIndex)
             {
@@ -414,12 +416,13 @@ namespace Intersect.Editor.Forms.Editors
             {
                 cmbTeachSpell.SelectedIndex = SpellBase.ListIndex(mEditorItem.SpellId) + 1;
                 chkQuickCast.Checked = mEditorItem.QuickCast;
-                chkDestroy.Checked = mEditorItem.DestroySpell;
+                chkSingleUseSpell.Checked = mEditorItem.SingleUse;
                 grpSpell.Visible = true;
             }
             else if (cmbType.SelectedIndex == (int) ItemTypes.Event)
             {
                 cmbEvent.SelectedIndex = EventBase.ListIndex(mEditorItem.EventId) + 1;
+                chkSingleUseEvent.Checked = mEditorItem.SingleUse;
                 grpEvent.Visible = true;
             }
             else if (cmbType.SelectedIndex == (int) ItemTypes.Equipment)
@@ -432,6 +435,10 @@ namespace Intersect.Editor.Forms.Editors
 
                 cmbEquipmentSlot.SelectedIndex = mEditorItem.EquipmentSlot;
                 cmbEquipmentBonus.SelectedIndex = (int) mEditorItem.Effect.Type;
+
+                // Whether this item type is stackable is not up for debate.
+                chkStackable.Checked = false;
+                chkStackable.Enabled = false;
             }
             else if (cmbType.SelectedIndex == (int) ItemTypes.Bag)
             {
@@ -439,6 +446,22 @@ namespace Intersect.Editor.Forms.Editors
                 mEditorItem.SlotCount = Math.Max(1, mEditorItem.SlotCount);
                 grpBags.Visible = true;
                 nudBag.Value = mEditorItem.SlotCount;
+
+                // Whether this item type is stackable is not up for debate.
+                chkStackable.Checked = false;
+                chkStackable.Enabled = false;
+            }
+            else if (cmbType.SelectedIndex == (int)ItemTypes.Currency)
+            {
+                // Whether this item type is stackable is not up for debate.
+                chkStackable.Checked = true;
+                chkStackable.Enabled = false;
+            }
+            else if (cmbType.SelectedIndex == (int)ItemTypes.Currency)
+            {
+                // Whether this item type is stackable is not up for debate.
+                chkStackable.Checked = true;
+                chkStackable.Enabled = false;
             }
 
             mEditorItem.ItemType = (ItemTypes) cmbType.SelectedIndex;
@@ -857,9 +880,17 @@ namespace Intersect.Editor.Forms.Editors
             mEditorItem.QuickCast = chkQuickCast.Checked;
         }
 
-        private void chkDestroy_CheckedChanged(object sender, EventArgs e)
+        private void chkSingleUse_CheckedChanged(object sender, EventArgs e)
         {
-            mEditorItem.DestroySpell = chkDestroy.Checked;
+            switch ((ItemTypes)cmbType.SelectedIndex)
+            {
+                case ItemTypes.Spell:
+                    mEditorItem.SingleUse = chkSingleUseSpell.Checked;
+                    break;
+                case ItemTypes.Event:
+                    mEditorItem.SingleUse = chkSingleUseEvent.Checked;
+                    break;
+            }
         }
 
         private void cmbRarity_SelectedIndexChanged(object sender, EventArgs e)

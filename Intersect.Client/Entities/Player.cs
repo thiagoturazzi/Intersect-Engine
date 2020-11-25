@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Collections.Generic;
 
 using Intersect.Client.Core;
@@ -17,6 +18,8 @@ using Intersect.GameObjects.Maps;
 using Intersect.Network.Packets.Server;
 
 using Newtonsoft.Json;
+using Intersect.Client.Framework.GenericClasses;
+using Intersect.Utilities;
 
 namespace Intersect.Client.Entities
 {
@@ -114,21 +117,9 @@ namespace Intersect.Client.Entities
             return Party.Count > 0;
         }
 
-        public bool IsInMyParty(Entity entity)
-        {
-            if (EntityTypes.Player == entity.GetEntityType())
-            {
-                foreach (var member in Party)
-                {
-                    if (member.Id == entity.Id)
-                    {
-                        return true;
-                    }
-                }
-            }
+        public bool IsInMyParty(Player player) => IsInMyParty(player.Id);
 
-            return false;
-        }
+        public bool IsInMyParty(Guid id) => Party.Any(member => member.Id == id);
 
         public bool IsBusy()
         {
@@ -161,9 +152,9 @@ namespace Intersect.Client.Entities
                 {
                     if (!Globals.Me.TryAttack())
                     {
-                        if (Globals.Me.AttackTimer < Globals.System.GetTimeMs())
+                        if (Globals.Me.AttackTimer < Timing.Global.Ticks / TimeSpan.TicksPerMillisecond)
                         {
-                            Globals.Me.AttackTimer = Globals.System.GetTimeMs() + Globals.Me.CalculateAttackTime();
+                            Globals.Me.AttackTimer = Timing.Global.Ticks / TimeSpan.TicksPerMillisecond + Globals.Me.CalculateAttackTime();
                         }
                     }
                 }
@@ -888,7 +879,7 @@ namespace Intersect.Client.Entities
                     if (en.Value.GetEntityType() == EntityTypes.GlobalEntity ||
                         en.Value.GetEntityType() == EntityTypes.Player)
                     {
-                        if (en.Value != Globals.Me && !Globals.Me.IsInMyParty(en.Value))
+                        if (en.Value != Globals.Me && !(en.Value is Player player && Globals.Me.IsInMyParty(player)))
                         {
                             if (GetDistanceTo(en.Value) < GetDistanceTo(closestEntity))
                             {
@@ -930,7 +921,7 @@ namespace Intersect.Client.Entities
 
         public bool TryBlock()
         {
-            if (AttackTimer > Globals.System.GetTimeMs())
+            if (AttackTimer > Timing.Global.Ticks / TimeSpan.TicksPerMillisecond)
             {
                 return false;
             }
@@ -956,13 +947,13 @@ namespace Intersect.Client.Entities
             {
                 Blocking = false;
                 PacketSender.SendBlock(false);
-                AttackTimer = Globals.System.GetTimeMs() + CalculateAttackTime();
+                AttackTimer = Timing.Global.Ticks / TimeSpan.TicksPerMillisecond + CalculateAttackTime();
             }
         }
 
         public bool TryAttack()
         {
-            if (AttackTimer > Globals.System.GetTimeMs() || Blocking)
+            if (AttackTimer > Timing.Global.Ticks / TimeSpan.TicksPerMillisecond || Blocking || (IsMoving && !Options.Instance.PlayerOpts.AllowCombatMovement))
             {
                 return false;
             }
@@ -1008,7 +999,7 @@ namespace Intersect.Client.Entities
                         {
                             //ATTACKKKKK!!!
                             PacketSender.SendAttack(en.Key);
-                            AttackTimer = Globals.System.GetTimeMs() + CalculateAttackTime();
+                            AttackTimer = Timing.Global.Ticks / TimeSpan.TicksPerMillisecond + CalculateAttackTime();
 
                             return true;
                         }
@@ -1031,7 +1022,7 @@ namespace Intersect.Client.Entities
                         {
                             //Talk to Event
                             PacketSender.SendActivateEvent(en.Key);
-                            AttackTimer = Globals.System.GetTimeMs() + CalculateAttackTime();
+                            AttackTimer = Timing.Global.Ticks / TimeSpan.TicksPerMillisecond + CalculateAttackTime();
 
                             return true;
                         }
@@ -1041,7 +1032,7 @@ namespace Intersect.Client.Entities
 
             //Projectile/empty swing for animations
             PacketSender.SendAttack(Guid.Empty);
-            AttackTimer = Globals.System.GetTimeMs() + CalculateAttackTime();
+            AttackTimer = Timing.Global.Ticks / TimeSpan.TicksPerMillisecond + CalculateAttackTime();
 
             return true;
         }
@@ -1109,6 +1100,11 @@ namespace Intersect.Client.Entities
 
             var x = (int) Math.Floor(Globals.InputManager.GetMousePosition().X + Graphics.CurrentView.Left);
             var y = (int) Math.Floor(Globals.InputManager.GetMousePosition().Y + Graphics.CurrentView.Top);
+            var targetRect = new FloatRect(x - 8, y - 8, 16, 16); //Adjust to allow more/less error
+
+            Entity bestMatch = null;
+            var bestAreaMatch = 0f;
+
 
             foreach (MapInstance map in MapInstance.Lookup.Values)
             {
@@ -1129,63 +1125,16 @@ namespace Intersect.Client.Entities
                         {
                             foreach (var en in Globals.Entities)
                             {
-                                if (en.Value == null)
+                                if (en.Value == null || en.Value.CurrentMap != mapId || en.Value is Projectile || en.Value is Resource || (en.Value.IsStealthed() && (!(en.Value is Player player) || Globals.Me.IsInMyParty(player))))
                                 {
                                     continue;
                                 }
 
-                                if (en.Value.CurrentMap == mapId &&
-                                    en.Value.X == x &&
-                                    en.Value.Y == y &&
-                                    (!en.Value.IsStealthed() || Globals.Me.IsInMyParty(en.Value)))
+                                var intersectRect = FloatRect.Intersect(en.Value.WorldPos, targetRect);
+                                if (intersectRect.Width * intersectRect.Height > bestAreaMatch)
                                 {
-                                    if (en.Value.GetType() != typeof(Projectile) &&
-                                        en.Value.GetType() != typeof(Resource))
-                                    {
-                                        if (TargetBox != null)
-                                        {
-                                            TargetBox.Dispose();
-                                            TargetBox = null;
-                                        }
-
-                                        if (en.Value != Globals.Me)
-                                        {
-                                            if (en.Value.GetType() == typeof(Player))
-                                            {
-                                                TargetBox = new EntityBox(
-                                                    Interface.Interface.GameUi.GameCanvas, EntityTypes.Player, en.Value
-                                                );
-                                            }
-                                            else
-                                            {
-                                                TargetBox = new EntityBox(
-                                                    Interface.Interface.GameUi.GameCanvas, EntityTypes.GlobalEntity,
-                                                    en.Value
-                                                );
-                                            }
-                                        }
-
-                                        if (TargetType == 0 && TargetIndex == en.Value.Id)
-                                        {
-                                            ClearTarget();
-
-                                            return true;
-                                        }
-
-                                        if (en.Value.GetType() == typeof(Player))
-                                        {
-                                            //Select in admin window if open
-                                            if (Interface.Interface.GameUi.AdminWindowOpen())
-                                            {
-                                                Interface.Interface.GameUi.AdminWindowSelectName(en.Value.Name);
-                                            }
-                                        }
-
-                                        TargetType = 0;
-                                        TargetIndex = en.Value.Id;
-
-                                        return true;
-                                    }
+                                    bestAreaMatch = intersectRect.Width * intersectRect.Height;
+                                    bestMatch = en.Value;
                                 }
                             }
 
@@ -1193,40 +1142,73 @@ namespace Intersect.Client.Entities
                             {
                                 foreach (var en in eventMap.LocalEntities)
                                 {
-                                    if (en.Value == null)
+                                    if (en.Value == null || en.Value.CurrentMap != mapId || ((Event)en.Value).DisablePreview)
                                     {
                                         continue;
                                     }
 
-                                    if (en.Value.CurrentMap == mapId &&
-                                        en.Value.X == x &&
-                                        en.Value.Y == y &&
-                                        !((Event) en.Value).DisablePreview &&
-                                        (!en.Value.IsStealthed() || Globals.Me.IsInMyParty(en.Value)))
+                                    var intersectRect = FloatRect.Intersect(en.Value.WorldPos, targetRect);
+                                    if (intersectRect.Width * intersectRect.Height > bestAreaMatch)
                                     {
-                                        if (TargetBox != null)
-                                        {
-                                            TargetBox.Dispose();
-                                            TargetBox = null;
-                                        }
-
-                                        TargetBox = new EntityBox(
-                                            Interface.Interface.GameUi.GameCanvas, EntityTypes.Event, en.Value
-                                        );
-
-                                        if (TargetType == 1 && TargetIndex == en.Value.Id)
-                                        {
-                                            ClearTarget();
-
-                                            return true;
-                                        }
-
-                                        TargetType = 1;
-                                        TargetIndex = en.Value.Id;
-
-                                        return true;
+                                        bestAreaMatch = intersectRect.Width * intersectRect.Height;
+                                        bestMatch = en.Value;
                                     }
                                 }
+                            }
+
+                            if (bestMatch != null)
+                            {
+                                if (TargetBox != null)
+                                {
+                                    TargetBox.Dispose();
+                                    TargetBox = null;
+                                }
+
+                                var targetType = bestMatch is Event ? 1 : 0;
+
+                                if (bestMatch != Globals.Me)
+                                {
+                                    if (bestMatch is Player)
+                                    {
+                                        TargetBox = new EntityBox(
+                                            Interface.Interface.GameUi.GameCanvas, EntityTypes.Player, bestMatch
+                                        );
+                                    }
+                                    else if (bestMatch is Event)
+                                    {
+                                        TargetBox = new EntityBox(
+                                            Interface.Interface.GameUi.GameCanvas, EntityTypes.Event, bestMatch
+                                        );
+                                    }
+                                    else
+                                    {
+                                        TargetBox = new EntityBox(
+                                            Interface.Interface.GameUi.GameCanvas, EntityTypes.GlobalEntity,
+                                            bestMatch
+                                        );
+                                    }
+                                }
+
+                                if (TargetType == targetType && TargetIndex == bestMatch.Id)
+                                {
+                                    ClearTarget();
+
+                                    return true;
+                                }
+
+                                if (bestMatch.GetType() == typeof(Player))
+                                {
+                                    //Select in admin window if open
+                                    if (Interface.Interface.GameUi.AdminWindowOpen())
+                                    {
+                                        Interface.Interface.GameUi.AdminWindowSelectName(bestMatch.Name);
+                                    }
+                                }
+
+                                TargetType = targetType;
+                                TargetIndex = bestMatch.Id;
+
+                                return true;
                             }
                         }
 
@@ -1267,6 +1249,13 @@ namespace Intersect.Client.Entities
             {
                 if (item.Value.X == X && item.Value.Y == Y)
                 {
+                    // Are we allowed to see and pick this item up?
+                    if (!item.Value.VisibleToAll && item.Value.Owner != Globals.Me.Id && !Globals.Me.IsInMyParty(item.Value.Owner))
+                    {
+                        // This item does not apply to us!
+                        return false;
+                    }
+
                     PacketSender.SendPickupItem(item.Key);
 
                     return true;
@@ -1330,9 +1319,6 @@ namespace Intersect.Client.Entities
         //Movement Processing
         private void ProcessDirectionalInput()
         {
-            var didMove = false;
-            var tmpI = -1;
-
             //Check if player is crafting
             if (Globals.InCraft == true)
             {
@@ -1356,6 +1342,11 @@ namespace Intersect.Client.Entities
                 return;
             }
 
+            if (AttackTimer > Timing.Global.Ticks / TimeSpan.TicksPerMillisecond && !Options.Instance.PlayerOpts.AllowCombatMovement)
+            {
+                return;
+            }
+
             var tmpX = (sbyte) X;
             var tmpY = (sbyte) Y;
             Entity blockedBy = null;
@@ -1363,7 +1354,7 @@ namespace Intersect.Client.Entities
             if (MoveDir > -1 && Globals.EventDialogs.Count == 0)
             {
                 //Try to move if able and not casting spells.
-                if (!IsMoving && MoveTimer < Globals.System.GetTimeMs() && CastTime < Globals.System.GetTimeMs())
+                if (!IsMoving && MoveTimer < Timing.Global.Ticks / TimeSpan.TicksPerMillisecond && CastTime < Globals.System.GetTimeMs())
                 {
                     switch (MoveDir)
                     {
@@ -1420,8 +1411,6 @@ namespace Intersect.Client.Entities
 
                     if (IsMoving)
                     {
-                        MoveTimer = Globals.System.GetTimeMs() + GetMovementTime();
-                        didMove = true;
                         if (tmpX < 0 || tmpY < 0 || tmpX > Options.MapWidth - 1 || tmpY > Options.MapHeight - 1)
                         {
                             var gridX = MapInstance.Get(Globals.Me.CurrentMap).MapGridX;
@@ -1461,6 +1450,7 @@ namespace Intersect.Client.Entities
                                 CurrentMap = Globals.MapGrid[gridX, gridY];
                                 FetchNewMaps();
                             }
+
                         }
                         else
                         {
@@ -1469,6 +1459,8 @@ namespace Intersect.Client.Entities
                         }
 
                         TryToChangeDimension();
+                        PacketSender.SendMove();
+                        MoveTimer = (Timing.Global.Ticks / TimeSpan.TicksPerMillisecond) + (long)GetMovementTime();
                     }
                     else
                     {
@@ -1485,13 +1477,6 @@ namespace Intersect.Client.Entities
                         }
                     }
                 }
-            }
-
-            Globals.MyX = X;
-            Globals.MyY = Y;
-            if (didMove)
-            {
-                PacketSender.SendMove();
             }
         }
 
@@ -1775,7 +1760,7 @@ namespace Intersect.Client.Entities
                     continue;
                 }
 
-                if (!en.Value.IsStealthed() || Globals.Me.IsInMyParty(en.Value))
+                if (!en.Value.IsStealthed() || en.Value is Player player && Globals.Me.IsInMyParty(player))
                 {
                     if (en.Value.GetType() != typeof(Projectile) && en.Value.GetType() != typeof(Resource))
                     {
@@ -1803,7 +1788,7 @@ namespace Intersect.Client.Entities
 
                     if (en.Value.CurrentMap == eventMap.Id &&
                         !((Event) en.Value).DisablePreview &&
-                        (!en.Value.IsStealthed() || Globals.Me.IsInMyParty(en.Value)))
+                        (!en.Value.IsStealthed() || en.Value is Player player && Globals.Me.IsInMyParty(player)))
                     {
                         if (TargetType == 1 && TargetIndex == en.Value.Id)
                         {
@@ -1813,14 +1798,12 @@ namespace Intersect.Client.Entities
                 }
             }
 
-            var x = (int) Math.Floor(Globals.InputManager.GetMousePosition().X + Graphics.CurrentView.Left);
-            var y = (int) Math.Floor(Globals.InputManager.GetMousePosition().Y + Graphics.CurrentView.Top);
-
+            var mousePos = Graphics.ConvertToWorldPoint(Globals.InputManager.GetMousePosition());
             foreach (MapInstance map in MapInstance.Lookup.Values)
             {
-                if (x >= map.GetX() && x <= map.GetX() + Options.MapWidth * Options.TileWidth)
+                if (mousePos.X >= map.GetX() && mousePos.X <= map.GetX() + Options.MapWidth * Options.TileWidth)
                 {
-                    if (y >= map.GetY() && y <= map.GetY() + Options.MapHeight * Options.TileHeight)
+                    if (mousePos.Y >= map.GetY() && mousePos.Y <= map.GetY() + Options.MapHeight * Options.TileHeight)
                     {
                         var mapId = map.Id;
 
@@ -1833,7 +1816,7 @@ namespace Intersect.Client.Entities
 
                             if (en.Value.CurrentMap == mapId &&
                                 !en.Value.IsStealthed() &&
-                                en.Value.WorldPos.Contains(x, y))
+                                en.Value.WorldPos.Contains(mousePos.X, mousePos.Y))
                             {
                                 if (en.Value.GetType() != typeof(Projectile) && en.Value.GetType() != typeof(Resource))
                                 {
@@ -1857,7 +1840,7 @@ namespace Intersect.Client.Entities
                                 if (en.Value.CurrentMap == mapId &&
                                     !((Event) en.Value).DisablePreview &&
                                     !en.Value.IsStealthed() &&
-                                    en.Value.WorldPos.Contains(x, y))
+                                    en.Value.WorldPos.Contains(mousePos.X, mousePos.Y))
                                 {
                                     if (TargetType != 1 || TargetIndex != en.Value.Id)
                                     {

@@ -19,7 +19,9 @@ using Intersect.GameObjects.Maps;
 using Intersect.GameObjects.Maps.MapList;
 using Intersect.Logging;
 using Intersect.Network;
+using Intersect.Network.Packets;
 using Intersect.Network.Packets.Server;
+using Intersect.Utilities;
 
 namespace Intersect.Client.Networking
 {
@@ -33,9 +35,14 @@ namespace Intersect.Client.Networking
 
         public static bool HandlePacket(IPacket packet)
         {
+            if (packet is AbstractTimedPacket timedPacket)
+            {
+                Timing.Global.Synchronize(timedPacket.UTC, timedPacket.Offset);
+            }
+
             if (packet is CerasPacket)
             {
-                HandlePacket((dynamic) packet);
+                HandlePacket((dynamic)packet);
             }
 
             return true;
@@ -248,9 +255,32 @@ namespace Intersect.Client.Networking
         //MapEntitiesPacket
         private static void HandlePacket(MapEntitiesPacket packet)
         {
+            var mapEntities = new Dictionary<Guid, List<Guid>>();
             foreach (var pkt in packet.MapEntities)
             {
                 HandlePacket((dynamic) pkt);
+
+                if (!mapEntities.ContainsKey(pkt.MapId))
+                {
+                    mapEntities.Add(pkt.MapId, new List<Guid>());
+                }
+
+                mapEntities[pkt.MapId].Add(pkt.EntityId);
+            }
+
+            //Remove any entities on the map that shouldn't be there anymore!
+            foreach (var entities in mapEntities)
+            {
+                foreach (var entity in Globals.Entities)
+                {
+                    if (entity.Value.CurrentMap == entities.Key && !entities.Value.Contains(entity.Key))
+                    {
+                        if (!Globals.EntitiesToDispose.Contains(entity.Key) && entity.Value != Globals.Me)
+                        {
+                            Globals.EntitiesToDispose.Add(entity.Key);
+                        }
+                    }
+                }
             }
         }
 
@@ -283,6 +313,11 @@ namespace Intersect.Client.Networking
                 }
 
                 en = MapInstance.Get(mapId).LocalEntities[id];
+            }
+
+            if (en == Globals.Me)
+            {
+                Log.Debug($"received epp: {Timing.Global.Milliseconds}");
             }
 
             if (en == Globals.Me &&
@@ -687,7 +722,8 @@ namespace Intersect.Client.Networking
 
             if (attackTimer > -1 && en != Globals.Me)
             {
-                en.AttackTimer = Globals.System.GetTimeMs() + attackTimer;
+                en.AttackTimer = Timing.Global.Ticks / TimeSpan.TicksPerMillisecond + attackTimer;
+                en.AttackTime = attackTimer;
             }
         }
 

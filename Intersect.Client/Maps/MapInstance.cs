@@ -132,6 +132,7 @@ namespace Intersect.Client.Maps
 
             MapLoaded = true;
             Autotiles = new MapAutotiles(this);
+            OnMapLoaded -= HandleMapLoaded;
             OnMapLoaded += HandleMapLoaded;
             if (MapRequests.ContainsKey(Id))
             {
@@ -593,7 +594,10 @@ namespace Intersect.Client.Maps
                         }
                     }
                 }
+                mTileBufferDict[i]?.Clear();
             }
+
+            mTileBuffers = null;
         }
 
         //Rendering/Drawing Code
@@ -647,6 +651,13 @@ namespace Intersect.Client.Maps
             //Draw Map Items
             foreach (var item in MapItems)
             {
+                // Are we allowed to see and pick this item up?
+                if (!item.Value.VisibleToAll && item.Value.Owner != Globals.Me.Id && !Globals.Me.IsInMyParty(item.Value.Owner))
+                {
+                    // This item does not apply to us!
+                    continue;
+                }
+
                 var itemBase = ItemBase.Get(item.Value.ItemId);
                 if (itemBase != null)
                 {
@@ -1195,6 +1206,7 @@ namespace Intersect.Client.Maps
         public void Dispose(bool prep = true, bool killentities = true)
         {
             MapLoaded = false;
+            OnMapLoaded -= HandleMapLoaded;
 
             foreach (var evt in mEvents)
             {

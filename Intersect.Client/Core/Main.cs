@@ -53,8 +53,6 @@ namespace Intersect.Client.Core
                     lookup.Delete(item);
                 }
             }
-
-            Globals.IsRunning = true;
         }
 
         public static void DestroyGame()
@@ -246,7 +244,11 @@ namespace Intersect.Client.Core
 
                 canShowWorld = true;
                 if (canShowWorld)
+                {
                     Globals.NeedsMaps = false;
+                    //Send ping to server, so it will resync time if needed as we load in
+                    PacketSender.SendPing();
+                }
             }
             else
             {

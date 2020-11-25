@@ -31,6 +31,12 @@ namespace Intersect
         [JsonProperty("OpenPortChecker", Order = 0)]
         protected bool _portChecker = true;
 
+        [JsonProperty("MaxClientConnections")]
+        protected int _maxConnections = 100;
+
+        [JsonProperty("MaximumLoggedinUsers")]
+        protected int _maxUsers = 50;
+
         [JsonProperty("UPnP", Order = -1)] protected bool _upnp = true;
 
         [JsonProperty("Chat")] public ChatOptions ChatOpts = new ChatOptions();
@@ -54,6 +60,12 @@ namespace Intersect
 
         [JsonProperty("Security")] public SecurityOptions SecurityOpts = new SecurityOptions();
 
+        [JsonProperty("Loot")] public LootOptions LootOpts = new LootOptions();
+
+        public SpriteOptions Sprites = new SpriteOptions();
+
+        [JsonProperty("Npc")] public NpcOptions NpcOpts = new NpcOptions();
+
         public SmtpSettings SmtpSettings = new SmtpSettings();
 
         [NotNull]
@@ -64,6 +76,16 @@ namespace Intersect
 
         //Public Getters
         public static ushort ServerPort { get => Instance._serverPort; set => Instance._serverPort = value; }
+
+        /// <summary>
+        /// Defines the maximum amount of network connections our server is allowed to handle.
+        /// </summary>
+        public static int MaxConnections => Instance._maxConnections;
+
+        /// <summary>
+        /// Defines the maximum amount of logged in users our server is allowed to handle.
+        /// </summary>
+        public static int MaxLoggedinUsers => Instance._maxUsers;
 
         public static int MaxStatValue => Instance.PlayerOpts.MaxStat;
 
@@ -80,12 +102,6 @@ namespace Intersect
         public static int ItemDropChance => Instance.PlayerOpts.ItemDropChance;
 
         public static int RequestTimeout => Instance.PlayerOpts.RequestTimeout;
-
-        public static int PartyInviteRange => Instance.PartyOpts.InviteRange;
-
-        public static int PartySharedXpRange => Instance.PartyOpts.SharedXpRange;
-
-        public static int PartyStartCommonEventRange => Instance.PartyOpts.NpcDeathCommonEventStartRange;
 
         public static int TradeRange => Instance.PlayerOpts.TradeRange;
 
@@ -115,10 +131,6 @@ namespace Intersect
 
         public static int GameBorderStyle => Instance.MapOpts.GameBorderStyle;
 
-        public static int ItemRepawnTime => Instance.MapOpts.ItemSpawnTime;
-
-        public static int ItemDespawnTime => Instance.MapOpts.ItemDespawnTime;
-
         public static bool ZDimensionVisible => Instance.MapOpts.ZDimensionVisible;
 
         public static int MapWidth => Instance?.MapOpts?.Width ?? 32;
@@ -134,6 +146,12 @@ namespace Intersect
         public static int MaxChatLength => Instance.ChatOpts.MaxChatLength;
 
         public static int MinChatInterval => Instance.ChatOpts.MinIntervalBetweenChats;
+
+        public static LootOptions Loot => Instance.LootOpts;
+
+        public static NpcOptions Npc => Instance.NpcOpts;
+
+        public static PartyOptions Party => Instance.PartyOpts;
 
         public static bool UPnP => Instance._upnp;
 

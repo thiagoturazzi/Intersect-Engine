@@ -151,6 +151,10 @@ namespace Intersect.GameObjects.Events.Commands
                 if (branch != Guid.Empty && commandLists.ContainsKey(branch))
                 {
                     copyLists.Add(branch, commandLists[branch]);
+                    foreach (var cmd in commandLists[branch])
+                    {
+                        cmd.GetCopyData(commandLists, copyLists);
+                    }
                 }
             }
 
@@ -424,6 +428,11 @@ namespace Intersect.GameObjects.Events.Commands
         public Guid ItemId { get; set; }
 
         public bool Add { get; set; } //If !Add then Remove
+
+        /// <summary>
+        /// Defines how the server is supposed to handle changing the items of this request.
+        /// </summary>
+        public ItemHandling ItemHandling { get; set; } = ItemHandling.Normal;
 
         public int Quantity { get; set; }
 

@@ -125,6 +125,13 @@ namespace Intersect.Configuration
         // TODO: What is this for?
         public List<string> IntroImages { get; set; } = new List<string>();
 
+        public string UpdateUrl { get; set; } = "";
+
+        /// <summary>
+        /// Sets a custom mouse cursor.
+        /// </summary>
+        public string MouseCursor { get; set; } = "";
+
         #endregion
 
         #region Serialization Hooks

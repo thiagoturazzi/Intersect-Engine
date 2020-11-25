@@ -240,6 +240,11 @@ namespace Intersect.Editor.Localization
             return Strings.EventConditionDesc.map.ToString(EventConditionDesc.mapnotfound);
         }
 
+        public static string GetEventConditionalDesc(HasFreeInventorySlots condition)
+        {
+            return Strings.EventConditionDesc.HasFreeInventorySlots.ToString(condition.Quantity);
+        }
+
         public static string GetVariableComparisonString(VariableCompaison comparison)
         {
             return "";
@@ -1225,6 +1230,17 @@ Tick timer saved in server config.json.";
 
             public static LocalizedString item = @"Item:";
 
+            [NotNull, JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+            public static LocalizedString Method = @"Method:";
+
+            [NotNull, JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+            public static Dictionary<int, LocalizedString> Methods = new Dictionary<int, LocalizedString>
+            {
+                {0, @"Normal"},
+                {1, @"Allow Overflow"},
+                {2, @"Up to Amount" },
+            };
+
             public static LocalizedString okay = @"Ok";
 
             public static LocalizedString title = @"Change Player Items";
@@ -1791,6 +1807,7 @@ Tick timer saved in server config.json.";
                 {15, @"Gender is..."},
                 {16, @"Map is..."},
                 {17, @"Item Equipped is..."},
+                {18, @"Has X free Inventory slots..." }
             };
 
             public static LocalizedString endrange = @"End Range:";
@@ -1834,6 +1851,9 @@ Tick timer saved in server config.json.";
             public static LocalizedString mapis = @"Map Is...";
 
             public static LocalizedString negated = @"Negated";
+
+            [NotNull, JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+            public static LocalizedString HasElse = @"Has Else";
 
             public static LocalizedString numericvariable = @"Numeric Variable:";
 
@@ -1908,6 +1928,9 @@ Tick timer saved in server config.json.";
             public static LocalizedString value = @"Static Value:";
 
             public static LocalizedString variable = @"Variable Is...";
+
+            [NotNull, JsonProperty]
+            public static LocalizedString FreeInventorySlots = @"Has X free Inventory slots";
 
         }
 
@@ -1985,6 +2008,9 @@ Tick timer saved in server config.json.";
             public static LocalizedString questinprogress = @"Quest In Progress: {00} {01}";
 
             public static LocalizedString selfswitch = @"Self Switch {00} is {01}";
+
+            [NotNull, JsonProperty]
+            public static LocalizedString HasFreeInventorySlots = @"Player has {00} free inventory slot(s)";
 
             public static Dictionary<int, LocalizedString> selfswitches = new Dictionary<int, LocalizedString>
             {
@@ -2871,6 +2897,8 @@ Tick timer saved in server config.json.";
 
             public static LocalizedString destroyspell = @"Destroy On Use?";
 
+            public static LocalizedString SingleUseEvent = @"Destroy On Use?";
+
             public static LocalizedString stackable = @"Stackable?";
 
             public static LocalizedString title = @"Item Editor";
@@ -3057,6 +3085,9 @@ Tick timer saved in server config.json.";
             public static LocalizedString resourceeditor = @"Resource Editor";
 
             public static LocalizedString resources = @"Resources";
+
+            [NotNull, JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+            public static LocalizedString Events = @"Events";
 
             public static LocalizedString revision = @"Revision: {00}";
 
@@ -4344,6 +4375,52 @@ Negative values for time to flow backwards.";
             public static LocalizedString title = @"Time Editor (Day/Night Settings)";
 
             public static LocalizedString to = @"to";
+
+        }
+        
+        public struct Update
+        {
+
+            public static LocalizedString Title = @"Intersect Editor - Updating";
+
+            public static LocalizedString Checking = @"Checking for updates, please wait!";
+
+            public static LocalizedString Updating = @"Downloading updates, {00}% done!";
+
+            public static LocalizedString Restart = @"Update complete! Relaunching!";
+
+            public static LocalizedString Done = @"Update complete! Launching game!";
+
+            public static LocalizedString Error = @"Error: {00}";
+
+            public static LocalizedString Files = @"{00} Files Remaining";
+
+            public static LocalizedString Size = @"{00} Left";
+
+            public static LocalizedString Percent = @"{00}%";
+
+        }
+
+        public struct UpdatePacking
+        {
+
+            public static LocalizedString Title = @"Packaging Updater Files, Please Wait!";
+
+            public static LocalizedString Deleting = @"Deleting existing or unchanged files..";
+
+            public static LocalizedString Differential = @"An update already exists in this folder, would you like to generate a differential update (only files that have changed)?";
+
+            public static LocalizedString DifferentialTitle = @"Create differential update?";
+
+            public static LocalizedString Empty = @"You must select an empty folder, or a folder already containing an Intersect update!";
+
+            public static LocalizedString InvalidBase = @"You cannot create the update within the editor folder, the update would include itself!";
+
+            public static LocalizedString Error = @"Error!";
+
+            public static LocalizedString Calculating = @"Calculating checksums, and creating update list...";
+
+            public static LocalizedString Done = @"Done!";
 
         }
 
